@@ -1,0 +1,17 @@
+{
+  "couple": "./assets/couple.png",
+  "garden_bg": "./assets/garden_bg.png",
+  "bedroom_bg": "./assets/bedroom_bg.png",
+  "bouquet": "./assets/bouquet.png",
+  "envelope": "./assets/envelope.png",
+  "night_bg": "./assets/night_bg.png",
+  "heart": "./assets/heart.png",
+  "sparkles": "./assets/sparkles.png",
+  "logo": "./assets/logo.png",
+  "petals": "./assets/petals.png",
+  "rose": "./assets/rose.png",
+  "peony": "./assets/peony.png",
+  "tulip": "./assets/tulip.png",
+  "daisy": "./assets/daisy.png",
+  "sunflower": "./assets/sunflower.png"
+}
