@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Heart, Copy, Sparkles, Volume2, VolumeX, ArrowRight, Check, Share2, Mail } from 'lucide-react';
 import * as Tone from 'tone';
-import { saveStory, fetchStory } from './src/supabase';
+import { saveStory, fetchStory, markStoryPaid } from './src/supabase';
+import { openRazorpayCheckout, CHECKOUT_AMOUNT_PAISE, PaymentCancelled } from './src/razorpay';
 
 // ═══════════════════════════════════════════════════════════════════
 //  GARDEN OF US — pixel art kawaii arcade edition
@@ -529,7 +530,7 @@ const MusicButton = ({ on, toggle, dark = false }) => (
 //  SCREEN 1 — FORM
 // ═══════════════════════════════════════════════════════════════════
 const FormScreen = ({ onSubmit, musicOn, toggleMusic }) => {
-  const [data, setData] = useState({ sender: '', partner: '', nickname: '', note: '' });
+  const [data, setData] = useState({ sender: '', partner: '', nickname: '', note: '', email: '', phone: '' });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -539,10 +540,15 @@ const FormScreen = ({ onSubmit, musicOn, toggleMusic }) => {
     if (!data.partner.trim()) e.partner = true;
     if (!data.nickname.trim()) e.nickname = true;
     if (!data.note.trim()) e.note = true;
+    if (!/^\S+@\S+\.\S+$/.test(data.email.trim())) e.email = true;
+    const phoneLast10 = data.phone.replace(/\D/g, '').slice(-10);
+    if (!/^[6-9]\d{9}$/.test(phoneLast10)) e.phone = true;
     if (Object.keys(e).length) { setErrors(e); return; }
+    const clean = { ...data, email: data.email.trim(), phone: phoneLast10 };
+    setData(clean);
     setSubmitting(true);
     try {
-      await onSubmit(data);
+      await onSubmit(clean);
     } catch (err) {
       // parent already alerted; just unstick the button
       console.warn('[form] submit threw, resetting button');
@@ -611,6 +617,22 @@ const FormScreen = ({ onSubmit, musicOn, toggleMusic }) => {
                 placeholder="say the thing you've been meaning to say..."
                 rows={4} maxLength={400}/>
               <div className="text-right font-px text-xs text-[#8B2E6B]/40 mt-1">{data.note.length}/400</div>
+            </div>
+            <div>
+              <label className="font-px font-semibold text-[#8B2E6B] text-sm block mb-1.5">your email <span className="text-[#8B2E6B]/50 text-xs">(for the receipt)</span></label>
+              <input className={`pixel-input ${errors.email ? 'shake' : ''}`}
+                type="email" inputMode="email" autoComplete="email"
+                value={data.email}
+                onChange={e => { setData({...data, email: e.target.value}); setErrors({...errors, email: false}); }}
+                placeholder="you@example.com" maxLength={80}/>
+            </div>
+            <div>
+              <label className="font-px font-semibold text-[#8B2E6B] text-sm block mb-1.5">your phone <span className="text-[#8B2E6B]/50 text-xs">(10 digits)</span></label>
+              <input className={`pixel-input ${errors.phone ? 'shake' : ''}`}
+                type="tel" inputMode="numeric" autoComplete="tel"
+                value={data.phone}
+                onChange={e => { setData({...data, phone: e.target.value}); setErrors({...errors, phone: false}); }}
+                placeholder="9876543210" maxLength={15}/>
             </div>
           </div>
 
@@ -1290,10 +1312,10 @@ const PreviewScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
     if (processing) return;
     setProcessing(true);
     try {
-      // Simulate payment processing — replace with real Razorpay later
-      await new Promise(r => setTimeout(r, 1800));
       await onPurchase();
-    } catch (e) {
+    } catch {
+      // onPurchase shows its own user-facing error
+    } finally {
       setProcessing(false);
     }
   };
@@ -1534,20 +1556,39 @@ const App = () => {
     setScreen('preview');
   };
 
-  // Called from PreviewScreen after the (simulated) payment completes
+  // Called from PreviewScreen when the user clicks PAY.
+  // Flow: insert pending story -> open Razorpay -> on success update + go to success screen.
   const handlePurchase = async () => {
     const id = generateId();
-    console.log('[purchase] payment complete, generating link with id:', id);
+    console.log('[purchase] starting flow with id:', id);
     try {
       await saveStory(id, data);
+      console.log('[purchase] pending story saved, opening Razorpay');
+
+      const payment = await openRazorpayCheckout({
+        storyId: id,
+        sender: data.sender,
+        nickname: data.nickname,
+        email: data.email,
+        phone: data.phone,
+      });
+      console.log('[purchase] payment success:', payment.razorpay_payment_id);
+
+      await markStoryPaid(id, payment);
+      console.log('[purchase] story marked paid');
+
       setExperienceId(id);
       try {
         window.history.replaceState(null, '', `${window.location.pathname}#/v/${id}`);
       } catch (e) { /* iframe may block — non-fatal */ }
       setScreen('success');
     } catch (e) {
-      console.error('[purchase] save failed:', e);
-      alert('something went wrong saving your garden... try again?\n\n' + (e.message || ''));
+      if (e instanceof PaymentCancelled) {
+        console.log('[purchase] cancelled by user — staying on preview');
+        return;
+      }
+      console.error('[purchase] flow failed:', e);
+      alert('payment didn\'t go through — give it another shot?\n\n' + (e.message || ''));
       throw e;
     }
   };
