@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Heart, Copy, Sparkles, Volume2, VolumeX, ArrowRight, Check, Share2, Mail } from 'lucide-react';
 import * as Tone from 'tone';
+import { saveStory, fetchStory } from './src/supabase';
 
 // ═══════════════════════════════════════════════════════════════════
 //  GARDEN OF US — pixel art kawaii arcade edition
@@ -1262,68 +1263,6 @@ const RevealScreen = ({ data, picked, onShare, onCreateOwn, musicOn, toggleMusic
 };
 
 // ═══════════════════════════════════════════════════════════════════
-//  SAFE STORAGE — works in Claude artifact, falls back to localStorage,
-//  then in-memory. With 5s timeout so it can never hang.
-// ═══════════════════════════════════════════════════════════════════
-const STORAGE_TIMEOUT_MS = 5000;
-const memStore = {};
-
-const withTimeout = (promise, ms, label) => Promise.race([
-  promise,
-  new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timeout`)), ms))
-]);
-
-const safeStorageSet = async (key, value) => {
-  // Try Claude artifact window.storage first
-  if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
-    try {
-      await withTimeout(window.storage.set(key, value, true), STORAGE_TIMEOUT_MS, 'storage.set');
-      console.log('[storage] saved via window.storage:', key);
-      return true;
-    } catch (e) {
-      console.warn('[storage] window.storage.set failed, falling back:', e.message);
-    }
-  }
-  // Fallback: localStorage (works in standalone React projects)
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(`gou:${key}`, value);
-      console.log('[storage] saved via localStorage:', key);
-      return true;
-    }
-  } catch (e) {
-    console.warn('[storage] localStorage failed:', e.message);
-  }
-  // Last resort: in-memory (won't persist but won't hang)
-  memStore[key] = value;
-  console.log('[storage] saved in-memory:', key);
-  return true;
-};
-
-const safeStorageGet = async (key) => {
-  // Try Claude artifact window.storage
-  if (typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function') {
-    try {
-      const r = await withTimeout(window.storage.get(key, true), STORAGE_TIMEOUT_MS, 'storage.get');
-      if (r && r.value) return r.value;
-    } catch (e) {
-      console.warn('[storage] window.storage.get failed, falling back:', e.message);
-    }
-  }
-  // Fallback: localStorage
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const v = localStorage.getItem(`gou:${key}`);
-      if (v) return v;
-    }
-  } catch (e) {
-    console.warn('[storage] localStorage get failed:', e.message);
-  }
-  // In-memory
-  return memStore[key] || null;
-};
-
-// ═══════════════════════════════════════════════════════════════════
 //  PREVIEW SCREEN — shown after form, before payment
 //  This is the conversion screen. Show them just enough magic to buy.
 // ═══════════════════════════════════════════════════════════════════
@@ -1574,9 +1513,9 @@ const App = () => {
         const match = hash.match(/^#\/v\/(.+)$/);
         if (match) {
           const id = match[1];
-          const stored = await safeStorageGet(`exp:${id}`);
-          if (stored) {
-            setData(JSON.parse(stored));
+          const story = await fetchStory(id);
+          if (story) {
+            setData(story);
             setExperienceId(id);
             setScreen('intro');
             return;
@@ -1600,7 +1539,7 @@ const App = () => {
     const id = generateId();
     console.log('[purchase] payment complete, generating link with id:', id);
     try {
-      await safeStorageSet(`exp:${id}`, JSON.stringify(data));
+      await saveStory(id, data);
       setExperienceId(id);
       try {
         window.history.replaceState(null, '', `${window.location.pathname}#/v/${id}`);
