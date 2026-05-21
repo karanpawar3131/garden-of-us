@@ -3,6 +3,7 @@ import { Heart, Copy, Sparkles, Volume2, VolumeX, ArrowRight, Check, Share2, Mai
 import * as Tone from 'tone';
 import { saveStory, fetchStory, markStoryPaid } from './src/supabase';
 import { openRazorpayCheckout, CHECKOUT_AMOUNT_PAISE, PaymentCancelled } from './src/razorpay';
+import { COUNTRIES, flagEmoji, DEFAULT_COUNTRY } from './src/countries';
 
 // ═══════════════════════════════════════════════════════════════════
 //  GARDEN OF US — pixel art kawaii arcade edition
@@ -530,7 +531,7 @@ const MusicButton = ({ on, toggle, dark = false }) => (
 //  SCREEN 1 — FORM
 // ═══════════════════════════════════════════════════════════════════
 const FormScreen = ({ onSubmit, musicOn, toggleMusic }) => {
-  const [data, setData] = useState({ sender: '', partner: '', nickname: '', note: '', email: '', phone: '' });
+  const [data, setData] = useState({ sender: '', partner: '', nickname: '', note: '' });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -540,15 +541,10 @@ const FormScreen = ({ onSubmit, musicOn, toggleMusic }) => {
     if (!data.partner.trim()) e.partner = true;
     if (!data.nickname.trim()) e.nickname = true;
     if (!data.note.trim()) e.note = true;
-    if (!/^\S+@\S+\.\S+$/.test(data.email.trim())) e.email = true;
-    const phoneLast10 = data.phone.replace(/\D/g, '').slice(-10);
-    if (!/^[6-9]\d{9}$/.test(phoneLast10)) e.phone = true;
     if (Object.keys(e).length) { setErrors(e); return; }
-    const clean = { ...data, email: data.email.trim(), phone: phoneLast10 };
-    setData(clean);
     setSubmitting(true);
     try {
-      await onSubmit(clean);
+      await onSubmit(data);
     } catch (err) {
       // parent already alerted; just unstick the button
       console.warn('[form] submit threw, resetting button');
@@ -618,22 +614,6 @@ const FormScreen = ({ onSubmit, musicOn, toggleMusic }) => {
                 rows={4} maxLength={400}/>
               <div className="text-right font-px text-xs text-[#8B2E6B]/40 mt-1">{data.note.length}/400</div>
             </div>
-            <div>
-              <label className="font-px font-semibold text-[#8B2E6B] text-sm block mb-1.5">your email <span className="text-[#8B2E6B]/50 text-xs">(for the receipt)</span></label>
-              <input className={`pixel-input ${errors.email ? 'shake' : ''}`}
-                type="email" inputMode="email" autoComplete="email"
-                value={data.email}
-                onChange={e => { setData({...data, email: e.target.value}); setErrors({...errors, email: false}); }}
-                placeholder="you@example.com" maxLength={80}/>
-            </div>
-            <div>
-              <label className="font-px font-semibold text-[#8B2E6B] text-sm block mb-1.5">your phone <span className="text-[#8B2E6B]/50 text-xs">(10 digits)</span></label>
-              <input className={`pixel-input ${errors.phone ? 'shake' : ''}`}
-                type="tel" inputMode="numeric" autoComplete="tel"
-                value={data.phone}
-                onChange={e => { setData({...data, phone: e.target.value}); setErrors({...errors, phone: false}); }}
-                placeholder="9876543210" maxLength={15}/>
-            </div>
           </div>
 
           <button onClick={submit} disabled={submitting}
@@ -665,7 +645,8 @@ const FormScreen = ({ onSubmit, musicOn, toggleMusic }) => {
 // ═══════════════════════════════════════════════════════════════════
 //  SCREEN 2 — SUCCESS / SHARE
 // ═══════════════════════════════════════════════════════════════════
-const SuccessScreen = ({ data, link, onPreview, onReset }) => {
+const SuccessScreen = ({ data, link, unlockMethod, onPreview, onReset }) => {
+  const isPromo = unlockMethod === 'promo';
   const [copied, setCopied] = useState(false);
 
   const copy = () => {
@@ -698,13 +679,20 @@ const SuccessScreen = ({ data, link, onPreview, onReset }) => {
         </div>
 
         <div className="text-center mb-6 fade-up" style={{ animationDelay: '0.2s' }}>
-          <p className="font-pixel text-[10px] text-[#FF6BB5] mb-2 tracking-wider">★ READY TO SEND ★</p>
+          <p className="font-pixel text-[10px] text-[#FF6BB5] mb-2 tracking-wider">
+            {isPromo ? '★ GIFTED WITH LOVE ★' : '★ READY TO SEND ★'}
+          </p>
           <h1 className="font-px font-bold text-[#4A2E5F] text-4xl leading-tight">
             it's blooming
           </h1>
           <p className="font-hand text-[#FF6BB5] text-4xl leading-none transform -rotate-2 inline-block mt-1">
             for {data.partner.toLowerCase()} ✿
           </p>
+          {isPromo && (
+            <p className="font-hand text-[#FF1F8F] text-xl mt-3 fade-up" style={{ animationDelay: '0.5s' }}>
+              your garden has been unlocked 🌸
+            </p>
+          )}
         </div>
 
         <div className="pixel-card p-4 fade-up scanline" style={{ animationDelay: '0.35s' }}>
@@ -1285,13 +1273,52 @@ const RevealScreen = ({ data, picked, onShare, onCreateOwn, musicOn, toggleMusic
 };
 
 // ═══════════════════════════════════════════════════════════════════
-//  PREVIEW SCREEN — shown after form, before payment
-//  This is the conversion screen. Show them just enough magic to buy.
+//  CHECKOUT SCREEN — shown after form. Collects email + phone + love code,
+//  then either bypasses Razorpay (valid promo) or opens it.
 // ═══════════════════════════════════════════════════════════════════
-const PreviewScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
+const PROMO_CODES = {
+  'CHEEKU2': { discount: 100, label: 'your garden is on us' },
+};
+const validatePromo = (raw) => {
+  if (!raw) return null;
+  return PROMO_CODES[raw.trim().toUpperCase()] || null;
+};
+
+const CheckoutScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
   const [bursts, setBursts] = useState([]);
   const [processing, setProcessing] = useState(false);
   const [tapCounts, setTapCounts] = useState({});
+
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [promoCode, setPromoCode] = useState('');
+  const [errors, setErrors] = useState({});
+
+  const [country, setCountry] = useState(DEFAULT_COUNTRY);
+  const [countryPickerOpen, setCountryPickerOpen] = useState(false);
+  const [countrySearch, setCountrySearch] = useState('');
+  const detailsRef = useRef(null);
+
+  // Close the country picker on Escape
+  useEffect(() => {
+    if (!countryPickerOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') setCountryPickerOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [countryPickerOpen]);
+
+  const filteredCountries = (() => {
+    const q = countrySearch.trim().toLowerCase().replace(/^\+/, '');
+    if (!q) return COUNTRIES;
+    const qDigits = q.replace(/\D/g, '');
+    return COUNTRIES.filter(c =>
+      c.name.toLowerCase().includes(q) ||
+      (qDigits && c.dial.startsWith(qDigits))
+    );
+  })();
+
+  const promo = validatePromo(promoCode);
+  const isFullDiscount = promo?.discount === 100;
 
   // Use first 3 flowers for the preview garden
   const previewFlowers = FLOWERS.slice(0, 3);
@@ -1310,9 +1337,24 @@ const PreviewScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
 
   const handleBuy = async () => {
     if (processing) return;
+    const e = {};
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) e.email = true;
+    const phoneDigits = phone.replace(/\D/g, '');
+    // International phone: 7-15 digits per E.164 (after country code is prepended)
+    if (!/^\d{7,15}$/.test(phoneDigits)) e.phone = true;
+    if (Object.keys(e).length) {
+      setErrors(e);
+      // Bring the missing fields into view — users often miss them under the sticky CTA
+      detailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     setProcessing(true);
     try {
-      await onPurchase();
+      await onPurchase({
+        email: email.trim(),
+        phone: `+${country.dial}${phoneDigits}`,
+        promoApplied: isFullDiscount ? promoCode.trim().toUpperCase() : null,
+      });
     } catch {
       // onPurchase shows its own user-facing error
     } finally {
@@ -1474,8 +1516,54 @@ const PreviewScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
           </p>
         </div>
 
+        {/* Your details — email, phone with country code, promo code */}
+        <div ref={detailsRef} className="pixel-card p-4 mb-5 fade-up" style={{ animationDelay: '0.65s' }}>
+          <p className="font-pixel text-[10px] text-[#FF6BB5] mb-3 tracking-[0.15em] text-center">★ FINAL TOUCHES ★</p>
+          <div className="space-y-3">
+            <div>
+              <label className="font-px font-semibold text-[#8B2E6B] text-sm block mb-1.5">your email <span className="text-[#8B2E6B]/50 text-xs">(for the receipt)</span></label>
+              <input className={`pixel-input ${errors.email ? 'shake' : ''}`}
+                type="email" inputMode="email" autoComplete="email"
+                value={email}
+                onChange={e => { setEmail(e.target.value); setErrors({...errors, email: false}); }}
+                placeholder="you@example.com" maxLength={80}/>
+            </div>
+            <div>
+              <label className="font-px font-semibold text-[#8B2E6B] text-sm block mb-1.5">your phone <span className="text-[#8B2E6B]/50 text-xs">(for the receipt)</span></label>
+              <div className={`flex gap-2 ${errors.phone ? 'shake' : ''}`}>
+                <button type="button"
+                  onClick={() => { setCountrySearch(''); setCountryPickerOpen(true); }}
+                  className="pixel-input flex items-center gap-1.5 flex-shrink-0"
+                  style={{ width: 'auto', padding: '12px' }}>
+                  <span className="text-lg leading-none">{flagEmoji(country.code)}</span>
+                  <span className="font-px text-[#4A2E5F]">+{country.dial}</span>
+                  <span className="text-[#8B2E6B]/50 text-xs leading-none">▾</span>
+                </button>
+                <input className="pixel-input flex-1"
+                  type="tel" inputMode="numeric" autoComplete="tel-national"
+                  value={phone}
+                  onChange={e => { setPhone(e.target.value); setErrors({...errors, phone: false}); }}
+                  placeholder="phone number" maxLength={15}/>
+              </div>
+            </div>
+            <div>
+              <label className="font-px font-semibold text-[#8B2E6B] text-sm block mb-1.5">promo code <span className="text-[#8B2E6B]/50 text-xs">(optional)</span></label>
+              <input className="pixel-input"
+                type="text" autoComplete="off" autoCapitalize="characters" spellCheck="false"
+                value={promoCode}
+                onChange={e => setPromoCode(e.target.value)}
+                placeholder="enter your code" maxLength={20}/>
+              {isFullDiscount && (
+                <p className="font-hand text-[#FF1F8F] text-lg mt-1.5 fade-up" style={{ animationDelay: '0s' }}>
+                  ✨ {promo.label} 🌸
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Social proof / trust */}
-        <div className="text-center mb-2 fade-up" style={{ animationDelay: '0.7s' }}>
+        <div className="text-center mb-2 fade-up" style={{ animationDelay: '0.75s' }}>
           <p className="font-px text-[#8B2E6B]/60 text-xs">
             🌷 made by people who believe small things matter
           </p>
@@ -1494,23 +1582,70 @@ const PreviewScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
               </p>
             </div>
             <div className="text-right flex-shrink-0">
-              <p className="font-px text-xs text-[#8B2E6B]/50 line-through leading-none">₹299</p>
-              <p className="font-pixel text-[#FF1F8F] text-2xl leading-none mt-1">₹199</p>
+              {isFullDiscount ? (
+                <>
+                  <p className="font-px text-xs text-[#8B2E6B]/50 line-through leading-none">₹199</p>
+                  <p className="font-pixel text-[#FF1F8F] text-2xl leading-none mt-1">FREE</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-px text-xs text-[#8B2E6B]/50 line-through leading-none">₹299</p>
+                  <p className="font-pixel text-[#FF1F8F] text-2xl leading-none mt-1">₹199</p>
+                </>
+              )}
             </div>
           </div>
           <button onClick={handleBuy} disabled={processing}
             className="pixel-btn w-full py-4 text-base flex items-center justify-center gap-2 shine-sweep relative overflow-hidden">
             {processing ? (
               <><Sparkles size={20} className="animate-spin"/> <span className="relative z-10">PROCESSING...</span></>
+            ) : isFullDiscount ? (
+              <><Sparkles size={18}/> <span className="relative z-10">UNLOCK MY GARDEN</span> <Heart size={16} fill="white"/></>
             ) : (
               <><Heart size={16} fill="white"/> <span className="relative z-10">PAY & GENERATE LINK</span> <ArrowRight size={18}/></>
             )}
           </button>
           <p className="font-hand text-[#8B2E6B]/70 text-center text-xs mt-1.5">
-            ✨ launch price · instant delivery · lasts forever ✨
+            {isFullDiscount ? '✨ promo applied · instant unlock' : '✨ launch price · instant delivery · lasts forever ✨'}
           </p>
         </div>
       </div>
+
+      {/* Country picker — full-screen searchable modal */}
+      {countryPickerOpen && (
+        <div className="fixed inset-0 z-[80] flex flex-col"
+          style={{ background: 'rgba(255, 229, 243, 0.97)', backdropFilter: 'blur(8px)' }}>
+          <div className="flex items-center justify-between px-4 py-3 border-b-2 border-[#FF6BB5]/30">
+            <p className="font-pixel text-[10px] text-[#FF6BB5] tracking-[0.2em]">★ PICK COUNTRY ★</p>
+            <button onClick={() => setCountryPickerOpen(false)}
+              className="w-10 h-10 rounded-full bg-[#FF6BB5] text-white flex items-center justify-center wiggle"
+              style={{ boxShadow: '0 3px 0 #D44A8B' }} aria-label="close">
+              <span className="font-px font-bold text-xl leading-none">×</span>
+            </button>
+          </div>
+          <div className="px-4 pt-3 pb-2">
+            <input className="pixel-input"
+              type="text" autoComplete="off" spellCheck="false" autoFocus
+              value={countrySearch}
+              onChange={e => setCountrySearch(e.target.value)}
+              placeholder="search country or code"/>
+          </div>
+          <div className="flex-1 overflow-y-auto px-2 pb-6 no-scrollbar">
+            {filteredCountries.map(c => (
+              <button key={c.code} type="button"
+                onClick={() => { setCountry(c); setCountryPickerOpen(false); setCountrySearch(''); setErrors({...errors, phone: false}); }}
+                className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/60 active:bg-white/80 transition-colors text-left">
+                <span className="text-2xl leading-none">{flagEmoji(c.code)}</span>
+                <span className="font-px text-[#4A2E5F] text-base flex-1">{c.name}</span>
+                <span className="font-px text-[#8B2E6B]/60 text-sm">+{c.dial}</span>
+              </button>
+            ))}
+            {filteredCountries.length === 0 && (
+              <p className="text-center font-hand text-[#8B2E6B]/60 text-lg mt-8">no matches · try another search</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1523,6 +1658,7 @@ const App = () => {
   const [data, setData] = useState(null);
   const [experienceId, setExperienceId] = useState(null);
   const [picked, setPicked] = useState([]);
+  const [unlockMethod, setUnlockMethod] = useState(null);
   const [musicOn, toggleMusic] = useAmbientMusic();
 
   const generateId = () => Math.random().toString(36).substring(2, 8) + Date.now().toString(36).slice(-4);
@@ -1550,45 +1686,63 @@ const App = () => {
   }, []);
 
   const handleSubmit = async (formData) => {
-    // Form submitted — stash data and go to PREVIEW (not save yet, not paid yet)
-    console.log('[submit] form data captured, going to preview');
+    // Form submitted — stash creation data and go to CHECKOUT (not saved, not paid yet).
+    // Email/phone/promo are collected on the next screen.
+    console.log('[submit] form data captured, going to checkout');
     setData(formData);
-    setScreen('preview');
+    setScreen('checkout');
   };
 
-  // Called from PreviewScreen when the user clicks PAY.
-  // Flow: insert pending story -> open Razorpay -> on success update + go to success screen.
-  const handlePurchase = async () => {
+  // Called from CheckoutScreen when the user clicks PAY (or UNLOCK if a promo is applied).
+  // checkoutData = { email, phone, promoApplied }
+  // Flow:
+  //   1. Insert pending story (merging form data + email/phone).
+  //   2. If promoApplied -> mark paid with unlock_method='promo' (bypass Razorpay).
+  //      Else            -> open Razorpay; on success mark paid with unlock_method='razorpay'.
+  //   3. Navigate to the success screen.
+  const handlePurchase = async ({ email, phone, promoApplied }) => {
     const id = generateId();
-    console.log('[purchase] starting flow with id:', id);
+    const fullData = { ...data, email, phone };
+    console.log('[purchase] starting flow with id:', id, '· promo:', promoApplied || 'none');
     try {
-      await saveStory(id, data);
-      console.log('[purchase] pending story saved, opening Razorpay');
+      await saveStory(id, fullData);
+      console.log('[purchase] pending story saved');
 
-      const payment = await openRazorpayCheckout({
-        storyId: id,
-        sender: data.sender,
-        nickname: data.nickname,
-        email: data.email,
-        phone: data.phone,
-      });
-      console.log('[purchase] payment success:', payment.razorpay_payment_id);
-
-      await markStoryPaid(id, payment);
-      console.log('[purchase] story marked paid');
+      if (promoApplied) {
+        await markStoryPaid(id, { unlock_method: 'promo', amount_paid: 0 });
+        console.log('[purchase] story unlocked via promo');
+        setUnlockMethod('promo');
+      } else {
+        const payment = await openRazorpayCheckout({
+          storyId: id,
+          sender: data.sender,
+          nickname: data.nickname,
+          email,
+          phone,
+        });
+        console.log('[purchase] payment success:', payment.razorpay_payment_id);
+        await markStoryPaid(id, {
+          razorpay_payment_id: payment.razorpay_payment_id,
+          amount_paid: payment.amount_paid,
+          unlock_method: 'razorpay',
+        });
+        console.log('[purchase] story marked paid');
+        setUnlockMethod('razorpay');
+      }
 
       setExperienceId(id);
+      setData(fullData);
       try {
         window.history.replaceState(null, '', `${window.location.pathname}#/v/${id}`);
       } catch (e) { /* iframe may block — non-fatal */ }
       setScreen('success');
     } catch (e) {
       if (e instanceof PaymentCancelled) {
-        console.log('[purchase] cancelled by user — staying on preview');
+        console.log('[purchase] cancelled by user — staying on checkout');
         return;
       }
       console.error('[purchase] flow failed:', e);
-      alert('payment didn\'t go through — give it another shot?\n\n' + (e.message || ''));
+      alert("couldn't unlock the garden — give it another shot?\n\n" + (e.message || ''));
       throw e;
     }
   };
@@ -1597,7 +1751,7 @@ const App = () => {
 
   const handlePreview = () => { setPicked([]); setScreen('intro'); };
   const handleReset = () => {
-    setData(null); setExperienceId(null); setPicked([]);
+    setData(null); setExperienceId(null); setPicked([]); setUnlockMethod(null);
     window.history.replaceState(null, '', window.location.pathname);
     setScreen('form');
   };
@@ -1629,12 +1783,13 @@ const App = () => {
       {screen === 'form' && (
         <FormScreen onSubmit={handleSubmit} musicOn={musicOn} toggleMusic={toggleMusic}/>
       )}
-      {screen === 'preview' && data && (
-        <PreviewScreen data={data} onPurchase={handlePurchase} onBack={handleBackToForm}
+      {screen === 'checkout' && data && (
+        <CheckoutScreen data={data} onPurchase={handlePurchase} onBack={handleBackToForm}
           musicOn={musicOn} toggleMusic={toggleMusic}/>
       )}
       {screen === 'success' && data && (
-        <SuccessScreen data={data} link={buildLink(experienceId)} onPreview={handlePreview} onReset={handleReset}/>
+        <SuccessScreen data={data} link={buildLink(experienceId)} unlockMethod={unlockMethod}
+          onPreview={handlePreview} onReset={handleReset}/>
       )}
       {screen === 'intro' && data && (
         <IntroScreen data={data} onContinue={() => setScreen('garden')} musicOn={musicOn} toggleMusic={toggleMusic}/>

@@ -25,7 +25,7 @@ export const openRazorpayCheckout = async ({ storyId, sender, nickname, email, p
       currency: 'INR',
       name: 'Garden of Us',
       description: `a flower garden for ${nickname}`,
-      prefill: { name: sender, email, contact: `+91${phone}` },
+      prefill: { name: sender, email, contact: phone },
       notes: { story_id: storyId },
       theme: { color: '#FF6BB5' },
       handler: (response) => {
