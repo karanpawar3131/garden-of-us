@@ -12,10 +12,10 @@ export const saveStory = async (id, { sender, partner, nickname, note, email, ph
   if (error) throw error;
 };
 
-export const markStoryPaid = async (id, { razorpay_payment_id, amount_paid }) => {
+export const markStoryPaid = async (id, { unlock_method, amount_paid, razorpay_payment_id = null }) => {
   const { error } = await supabase
     .from('stories')
-    .update({ payment_status: 'paid', razorpay_payment_id, amount_paid })
+    .update({ payment_status: 'paid', unlock_method, razorpay_payment_id, amount_paid })
     .eq('id', id)
     .eq('payment_status', 'pending');
   if (error) throw error;
