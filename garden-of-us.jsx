@@ -3,7 +3,29 @@ import { Heart, Copy, Sparkles, Volume2, VolumeX, ArrowRight, Check, Share2, Mai
 import * as Tone from 'tone';
 import { saveStory, fetchStory, markStoryPaid } from './src/supabase';
 import { openRazorpayCheckout, CHECKOUT_AMOUNT_PAISE, PaymentCancelled } from './src/razorpay';
-import { COUNTRIES, flagEmoji, DEFAULT_COUNTRY } from './src/countries';
+import PhoneInputModule from 'react-phone-input-2';
+// CJS-to-ESM interop: Vite returns { default: Class } for this lib's bundle.
+const PhoneInput = PhoneInputModule.default || PhoneInputModule;
+
+// Default country from browser locale (e.g. 'en-IN' -> 'in'). Falls back to India.
+const detectDefaultCountry = () => {
+  if (typeof navigator === 'undefined') return 'in';
+  const lang = navigator.language || (navigator.languages && navigator.languages[0]) || '';
+  const region = lang.split('-')[1];
+  return region ? region.toLowerCase() : 'in';
+};
+const DEFAULT_COUNTRY_ISO = detectDefaultCountry();
+
+// Country-name aliases so the dropdown search matches common queries
+// ("usa" -> United States, "uk" -> United Kingdom, "uae" -> United Arab Emirates).
+const COUNTRY_LOCALIZATION = {
+  'United States': 'United States (USA)',
+  'United Kingdom': 'United Kingdom (UK)',
+  'United Arab Emirates': 'United Arab Emirates (UAE)',
+  'Hong Kong': 'Hong Kong (HK)',
+  'Czech Republic': 'Czech Republic (Czechia)',
+  'Myanmar': 'Myanmar (Burma)',
+};
 
 // ═══════════════════════════════════════════════════════════════════
 //  GARDEN OF US — pixel art kawaii arcade edition
@@ -1294,28 +1316,7 @@ const CheckoutScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
   const [promoCode, setPromoCode] = useState('');
   const [errors, setErrors] = useState({});
 
-  const [country, setCountry] = useState(DEFAULT_COUNTRY);
-  const [countryPickerOpen, setCountryPickerOpen] = useState(false);
-  const [countrySearch, setCountrySearch] = useState('');
   const detailsRef = useRef(null);
-
-  // Close the country picker on Escape
-  useEffect(() => {
-    if (!countryPickerOpen) return;
-    const onKey = (e) => { if (e.key === 'Escape') setCountryPickerOpen(false); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [countryPickerOpen]);
-
-  const filteredCountries = (() => {
-    const q = countrySearch.trim().toLowerCase().replace(/^\+/, '');
-    if (!q) return COUNTRIES;
-    const qDigits = q.replace(/\D/g, '');
-    return COUNTRIES.filter(c =>
-      c.name.toLowerCase().includes(q) ||
-      (qDigits && c.dial.startsWith(qDigits))
-    );
-  })();
 
   const promo = validatePromo(promoCode);
   const isFullDiscount = promo?.discount === 100;
@@ -1339,8 +1340,9 @@ const CheckoutScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
     if (processing) return;
     const e = {};
     if (!/^\S+@\S+\.\S+$/.test(email.trim())) e.email = true;
+    // PhoneInput stores digits with the dial code prefixed (e.g. "919876543210").
+    // We add the leading "+" to make E.164. Require at least 7 total digits.
     const phoneDigits = phone.replace(/\D/g, '');
-    // International phone: 7-15 digits per E.164 (after country code is prepended)
     if (!/^\d{7,15}$/.test(phoneDigits)) e.phone = true;
     if (Object.keys(e).length) {
       setErrors(e);
@@ -1352,7 +1354,7 @@ const CheckoutScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
     try {
       await onPurchase({
         email: email.trim(),
-        phone: `+${country.dial}${phoneDigits}`,
+        phone: `+${phoneDigits}`,
         promoApplied: isFullDiscount ? promoCode.trim().toUpperCase() : null,
       });
     } catch {
@@ -1530,20 +1532,19 @@ const CheckoutScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
             </div>
             <div>
               <label className="font-px font-semibold text-[#8B2E6B] text-sm block mb-1.5">your phone <span className="text-[#8B2E6B]/50 text-xs">(for the receipt)</span></label>
-              <div className={`flex gap-2 ${errors.phone ? 'shake' : ''}`}>
-                <button type="button"
-                  onClick={() => { setCountrySearch(''); setCountryPickerOpen(true); }}
-                  className="pixel-input flex items-center gap-1.5 flex-shrink-0"
-                  style={{ width: 'auto', padding: '12px' }}>
-                  <span className="text-lg leading-none">{flagEmoji(country.code)}</span>
-                  <span className="font-px text-[#4A2E5F]">+{country.dial}</span>
-                  <span className="text-[#8B2E6B]/50 text-xs leading-none">▾</span>
-                </button>
-                <input className="pixel-input flex-1"
-                  type="tel" inputMode="numeric" autoComplete="tel-national"
+              <div className={errors.phone ? 'shake' : ''}>
+                <PhoneInput
+                  country={DEFAULT_COUNTRY_ISO}
                   value={phone}
-                  onChange={e => { setPhone(e.target.value); setErrors({...errors, phone: false}); }}
-                  placeholder="phone number" maxLength={15}/>
+                  onChange={(value) => { setPhone(value); setErrors({...errors, phone: false}); }}
+                  enableSearch
+                  disableSearchIcon
+                  searchPlaceholder="search country or code"
+                  searchNotFound="no matches · try another search"
+                  preferredCountries={['in', 'us', 'gb', 'ae', 'sg', 'au', 'ca']}
+                  localization={COUNTRY_LOCALIZATION}
+                  countryCodeEditable={false}
+                  inputProps={{ name: 'phone', autoComplete: 'tel', inputMode: 'tel' }}/>
               </div>
             </div>
             <div>
@@ -1611,41 +1612,6 @@ const CheckoutScreen = ({ data, onPurchase, onBack, musicOn, toggleMusic }) => {
         </div>
       </div>
 
-      {/* Country picker — full-screen searchable modal */}
-      {countryPickerOpen && (
-        <div className="fixed inset-0 z-[80] flex flex-col"
-          style={{ background: 'rgba(255, 229, 243, 0.97)', backdropFilter: 'blur(8px)' }}>
-          <div className="flex items-center justify-between px-4 py-3 border-b-2 border-[#FF6BB5]/30">
-            <p className="font-pixel text-[10px] text-[#FF6BB5] tracking-[0.2em]">★ PICK COUNTRY ★</p>
-            <button onClick={() => setCountryPickerOpen(false)}
-              className="w-10 h-10 rounded-full bg-[#FF6BB5] text-white flex items-center justify-center wiggle"
-              style={{ boxShadow: '0 3px 0 #D44A8B' }} aria-label="close">
-              <span className="font-px font-bold text-xl leading-none">×</span>
-            </button>
-          </div>
-          <div className="px-4 pt-3 pb-2">
-            <input className="pixel-input"
-              type="text" autoComplete="off" spellCheck="false" autoFocus
-              value={countrySearch}
-              onChange={e => setCountrySearch(e.target.value)}
-              placeholder="search country or code"/>
-          </div>
-          <div className="flex-1 overflow-y-auto px-2 pb-6 no-scrollbar">
-            {filteredCountries.map(c => (
-              <button key={c.code} type="button"
-                onClick={() => { setCountry(c); setCountryPickerOpen(false); setCountrySearch(''); setErrors({...errors, phone: false}); }}
-                className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/60 active:bg-white/80 transition-colors text-left">
-                <span className="text-2xl leading-none">{flagEmoji(c.code)}</span>
-                <span className="font-px text-[#4A2E5F] text-base flex-1">{c.name}</span>
-                <span className="font-px text-[#8B2E6B]/60 text-sm">+{c.dial}</span>
-              </button>
-            ))}
-            {filteredCountries.length === 0 && (
-              <p className="text-center font-hand text-[#8B2E6B]/60 text-lg mt-8">no matches · try another search</p>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

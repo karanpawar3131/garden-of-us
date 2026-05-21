@@ -1,3 +1,139 @@
+@import 'react-phone-input-2/lib/style.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ----------------------------------------------------------------------
+   react-phone-input-2 — pink pixel-art overrides.
+   Matches .pixel-input look: 3px solid #FF6BB5 border + 3px bottom shadow
+   on a soft white background, Pixelify Sans font, #4A2E5F text.
+---------------------------------------------------------------------- */
+
+.react-tel-input {
+  width: 100%;
+  font-family: 'Pixelify Sans', sans-serif;
+}
+
+.react-tel-input .form-control {
+  width: 100%;
+  height: 50px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 3px solid #FF6BB5;
+  border-radius: 10px;
+  padding: 12px 14px 12px 56px;
+  font-family: 'Pixelify Sans', sans-serif;
+  font-size: 16px;
+  color: #4A2E5F;
+  outline: none;
+  box-shadow: 0 3px 0 rgba(212, 74, 139, 0.3);
+  transition: all 0.15s;
+}
+.react-tel-input .form-control:focus {
+  border-color: #FF1F8F;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 rgba(212, 74, 139, 0.4), 0 0 0 4px rgba(255, 107, 181, 0.15);
+}
+.react-tel-input .form-control::placeholder {
+  color: rgba(74, 46, 95, 0.4);
+  font-family: 'Caveat', cursive;
+  font-size: 18px;
+}
+
+/* Flag + dial-code button on the left */
+.react-tel-input .flag-dropdown {
+  background: transparent;
+  border: none;
+  border-radius: 8px 0 0 8px;
+}
+.react-tel-input .flag-dropdown.open {
+  background: transparent;
+  border-radius: 8px 0 0 0;
+}
+.react-tel-input .selected-flag {
+  width: 50px;
+  padding: 0 0 0 12px;
+  border-radius: 8px 0 0 8px;
+}
+.react-tel-input .selected-flag:hover,
+.react-tel-input .selected-flag:focus,
+.react-tel-input .flag-dropdown.open .selected-flag {
+  background: rgba(255, 107, 181, 0.1);
+}
+.react-tel-input .selected-flag .arrow {
+  border-top-color: #FF6BB5;
+}
+.react-tel-input .selected-flag .arrow.up {
+  border-bottom-color: #FF6BB5;
+  border-top-color: transparent;
+}
+
+/* Dropdown panel */
+.react-tel-input .country-list {
+  background: rgba(255, 248, 252, 0.98);
+  border: 3px solid #FF6BB5;
+  border-radius: 12px;
+  margin-top: 6px;
+  max-height: 280px;
+  width: 320px;
+  box-shadow: 0 6px 20px rgba(212, 74, 139, 0.3);
+  z-index: 60;
+}
+
+/* Search input inside the dropdown */
+.react-tel-input .country-list .search {
+  padding: 8px;
+  border-bottom: 2px solid rgba(255, 107, 181, 0.25);
+  background: transparent;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.react-tel-input .country-list .search-box {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid #FF6BB5;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: 'Pixelify Sans', sans-serif;
+  font-size: 14px;
+  color: #4A2E5F;
+  outline: none;
+}
+.react-tel-input .country-list .search-box:focus {
+  border-color: #FF1F8F;
+}
+.react-tel-input .country-list .search-emoji {
+  display: none;
+}
+
+/* Country rows */
+.react-tel-input .country-list .country {
+  padding: 8px 12px;
+  font-family: 'Pixelify Sans', sans-serif;
+  color: #4A2E5F;
+}
+.react-tel-input .country-list .country .country-name {
+  color: #4A2E5F;
+}
+.react-tel-input .country-list .country .dial-code {
+  color: rgba(139, 46, 107, 0.7);
+}
+.react-tel-input .country-list .country:hover {
+  background: rgba(255, 107, 181, 0.1);
+}
+.react-tel-input .country-list .country.highlight {
+  background: rgba(255, 107, 181, 0.18);
+}
+.react-tel-input .country-list .country.preferred {
+  background: rgba(255, 240, 247, 0.6);
+}
+
+/* No-match line */
+.react-tel-input .country-list .no-entries-message {
+  padding: 16px;
+  font-family: 'Caveat', cursive;
+  font-size: 18px;
+  color: rgba(139, 46, 107, 0.7);
+  text-align: center;
+}
